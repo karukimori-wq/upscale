@@ -3,8 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>STAMP SCALE — LINEスタンプ用リサイザー</title>
+<title>STAMP SCALE — LINEスタンプ用AIアップスケーラー</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Noto+Sans+JP:wght@300;400;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-medium@1.0.0-beta.13/dist/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/upscaler@1.0.0-beta.19/dist/browser/umd/upscaler.min.js"></script>
 <style>
   :root {
     --bg: #0d0d0f;
@@ -16,9 +19,7 @@
     --muted: #888;
     --radius: 16px;
   }
-
   * { margin: 0; padding: 0; box-sizing: border-box; }
-
   body {
     background: var(--bg);
     color: var(--text);
@@ -29,8 +30,6 @@
     align-items: center;
     padding: 40px 20px;
   }
-
-  /* Noise overlay */
   body::before {
     content: '';
     position: fixed;
@@ -40,19 +39,8 @@
     z-index: 0;
     opacity: 0.4;
   }
-
-  .wrapper {
-    position: relative;
-    z-index: 1;
-    width: 100%;
-    max-width: 800px;
-  }
-
-  header {
-    text-align: center;
-    margin-bottom: 48px;
-  }
-
+  .wrapper { position: relative; z-index: 1; width: 100%; max-width: 800px; }
+  header { text-align: center; margin-bottom: 48px; }
   .logo {
     font-family: 'Syne', sans-serif;
     font-weight: 800;
@@ -60,18 +48,34 @@
     letter-spacing: -0.03em;
     line-height: 1;
   }
+  .logo span { color: var(--accent); }
+  .tagline { margin-top: 10px; color: var(--muted); font-size: 0.85rem; letter-spacing: 0.1em; text-transform: uppercase; }
 
-  .logo span {
-    color: var(--accent);
-  }
-
-  .tagline {
-    margin-top: 10px;
-    color: var(--muted);
+  /* AI Loading banner */
+  .ai-banner {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
     font-size: 0.85rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
   }
+  .ai-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+    transition: background 0.3s;
+  }
+  .ai-dot.loading { background: #f0c040; animation: pulse 1s infinite; }
+  .ai-dot.ready { background: var(--accent); }
+  .ai-dot.error { background: var(--accent2); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .ai-label { color: var(--muted); }
+  .ai-label strong { color: var(--text); }
 
   /* Drop zone */
   .drop-zone {
@@ -85,7 +89,6 @@
     position: relative;
     overflow: hidden;
   }
-
   .drop-zone::after {
     content: '';
     position: absolute;
@@ -94,319 +97,97 @@
     opacity: 0;
     transition: opacity 0.3s;
   }
-
-  .drop-zone:hover, .drop-zone.drag-over {
-    border-color: var(--accent);
-  }
-
-  .drop-zone:hover::after, .drop-zone.drag-over::after {
-    opacity: 1;
-  }
-
-  .drop-icon {
-    font-size: 3rem;
-    margin-bottom: 16px;
-    display: block;
-    animation: float 3s ease-in-out infinite;
-  }
-
-  @keyframes float {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-8px); }
-  }
-
-  .drop-text {
-    font-size: 1rem;
-    color: var(--muted);
-  }
-
-  .drop-text strong {
-    color: var(--accent);
-    font-weight: 700;
-  }
-
+  .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); }
+  .drop-zone:hover::after, .drop-zone.drag-over::after { opacity: 1; }
+  .drop-icon { font-size: 3rem; margin-bottom: 16px; display: block; animation: float 3s ease-in-out infinite; }
+  @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+  .drop-text { font-size: 1rem; color: var(--muted); }
+  .drop-text strong { color: var(--accent); font-weight: 700; }
   #fileInput { display: none; }
 
   /* Settings */
-  .settings {
-    margin-top: 32px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 24px;
-    display: none;
-  }
-
+  .settings { margin-top: 32px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; display: none; }
   .settings.visible { display: block; }
-
-  .settings-title {
-    font-family: 'Syne', sans-serif;
-    font-weight: 700;
-    font-size: 0.75rem;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    color: var(--muted);
-    margin-bottom: 20px;
-  }
-
-  .preset-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 10px;
-    margin-bottom: 20px;
-  }
-
+  .settings-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.75rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); margin-bottom: 20px; }
+  .preset-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 20px; }
   .preset-btn {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 12px;
-    color: var(--text);
-    cursor: pointer;
-    font-family: 'Noto Sans JP', sans-serif;
-    transition: border-color 0.2s, background 0.2s;
-    text-align: left;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 12px; color: var(--text); cursor: pointer;
+    font-family: 'Noto Sans JP', sans-serif; transition: border-color 0.2s, background 0.2s; text-align: left;
   }
-
-  .preset-btn:hover {
-    border-color: var(--accent);
-  }
-
-  .preset-btn.active {
-    border-color: var(--accent);
-    background: rgba(0,229,160,0.08);
-  }
-
-  .preset-label {
-    font-size: 0.7rem;
-    color: var(--accent);
-    font-family: 'Syne', sans-serif;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    display: block;
-    margin-bottom: 4px;
-  }
-
-  .preset-size {
-    font-size: 1.1rem;
-    font-family: 'Syne', sans-serif;
-    font-weight: 700;
-  }
-
-  .preset-desc {
-    font-size: 0.72rem;
-    color: var(--muted);
-    margin-top: 2px;
-  }
-
-  .custom-row {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-  }
-
-  .custom-row label {
-    font-size: 0.8rem;
-    color: var(--muted);
-    white-space: nowrap;
-  }
-
+  .preset-btn:hover { border-color: var(--accent); }
+  .preset-btn.active { border-color: var(--accent); background: rgba(0,229,160,0.08); }
+  .preset-label { font-size: 0.7rem; color: var(--accent); font-family: 'Syne', sans-serif; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; display: block; margin-bottom: 4px; }
+  .preset-size { font-size: 1.1rem; font-family: 'Syne', sans-serif; font-weight: 700; }
+  .preset-desc { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+  .custom-row { display: flex; gap: 10px; align-items: center; }
+  .custom-row label { font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
   .custom-row input {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 8px 12px;
-    color: var(--text);
-    font-family: 'Syne', sans-serif;
-    font-size: 0.9rem;
-    width: 90px;
-    transition: border-color 0.2s;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 12px; color: var(--text); font-family: 'Syne', sans-serif;
+    font-size: 0.9rem; width: 90px; transition: border-color 0.2s;
   }
-
-  .custom-row input:focus {
-    outline: none;
-    border-color: var(--accent);
-  }
+  .custom-row input:focus { outline: none; border-color: var(--accent); }
 
   /* Preview */
-  .preview-area {
-    margin-top: 32px;
-    display: none;
-  }
-
+  .preview-area { margin-top: 32px; display: none; }
   .preview-area.visible { display: block; }
-
-  .preview-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-  }
-
-  .preview-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px;
-    text-align: center;
-  }
-
-  .preview-card-label {
-    font-size: 0.7rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--muted);
-    font-family: 'Syne', sans-serif;
-    font-weight: 700;
-    margin-bottom: 14px;
-  }
-
+  .preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .preview-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; }
+  .preview-card-label { font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-family: 'Syne', sans-serif; font-weight: 700; margin-bottom: 14px; }
   .preview-img-wrap {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    display: flex; align-items: center; justify-content: center;
     min-height: 160px;
     background: repeating-conic-gradient(#1e1e22 0% 25%, #16161a 0% 50%) 0 0 / 16px 16px;
-    border-radius: 8px;
-    overflow: hidden;
-    margin-bottom: 12px;
+    border-radius: 8px; overflow: hidden; margin-bottom: 12px;
   }
+  .preview-img-wrap img, .preview-img-wrap canvas { max-width: 100%; max-height: 200px; object-fit: contain; display: block; }
+  .preview-info { font-size: 0.8rem; color: var(--muted); }
+  .preview-info strong { color: var(--text); font-family: 'Syne', sans-serif; }
 
-  .preview-img-wrap img, .preview-img-wrap canvas {
-    max-width: 100%;
-    max-height: 200px;
-    object-fit: contain;
-    display: block;
+  /* Processing overlay */
+  .processing-overlay {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 160px;
   }
-
-  .preview-info {
-    font-size: 0.8rem;
-    color: var(--muted);
+  .processing-overlay.visible { display: flex; }
+  .spinner {
+    width: 40px; height: 40px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
   }
-
-  .preview-info strong {
-    color: var(--text);
-    font-family: 'Syne', sans-serif;
-  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .processing-text { font-size: 0.82rem; color: var(--accent); font-family: 'Syne', sans-serif; }
 
   /* Action */
-  .action-row {
-    margin-top: 24px;
-    display: flex;
-    gap: 12px;
-    align-items: center;
-  }
-
+  .action-row { margin-top: 24px; display: flex; gap: 12px; align-items: center; }
   .btn-primary {
-    background: var(--accent);
-    color: #000;
-    border: none;
-    border-radius: 10px;
-    padding: 14px 32px;
-    font-family: 'Syne', sans-serif;
-    font-weight: 700;
-    font-size: 0.95rem;
-    cursor: pointer;
-    letter-spacing: 0.04em;
-    transition: transform 0.15s, box-shadow 0.15s;
-    flex: 1;
+    background: var(--accent); color: #000; border: none; border-radius: 10px;
+    padding: 14px 32px; font-family: 'Syne', sans-serif; font-weight: 700;
+    font-size: 0.95rem; cursor: pointer; letter-spacing: 0.04em;
+    transition: transform 0.15s, box-shadow 0.15s; flex: 1;
   }
-
-  .btn-primary:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0,229,160,0.3);
-  }
-
-  .btn-primary:active {
-    transform: translateY(0);
-  }
-
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,229,160,0.3); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
   .btn-secondary {
-    background: transparent;
-    color: var(--muted);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 20px;
-    font-family: 'Syne', sans-serif;
-    font-size: 0.85rem;
-    cursor: pointer;
-    transition: border-color 0.2s, color 0.2s;
+    background: transparent; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 20px; font-family: 'Syne', sans-serif;
+    font-size: 0.85rem; cursor: pointer; transition: border-color 0.2s, color 0.2s;
   }
-
-  .btn-secondary:hover {
-    border-color: var(--accent2);
-    color: var(--accent2);
-  }
+  .btn-secondary:hover { border-color: var(--accent2); color: var(--accent2); }
 
   /* Status */
-  .status-bar {
-    margin-top: 20px;
-    padding: 12px 16px;
-    border-radius: 10px;
-    font-size: 0.82rem;
-    display: none;
-  }
+  .status-bar { margin-top: 20px; padding: 12px 16px; border-radius: 10px; font-size: 0.82rem; display: none; }
+  .status-bar.success { background: rgba(0,229,160,0.1); border: 1px solid rgba(0,229,160,0.3); color: var(--accent); display: block; }
+  .status-bar.warning { background: rgba(255,107,107,0.1); border: 1px solid rgba(255,107,107,0.3); color: var(--accent2); display: block; }
 
-  .status-bar.success {
-    background: rgba(0,229,160,0.1);
-    border: 1px solid rgba(0,229,160,0.3);
-    color: var(--accent);
-    display: block;
-  }
-
-  .status-bar.warning {
-    background: rgba(255,107,107,0.1);
-    border: 1px solid rgba(255,107,107,0.3);
-    color: var(--accent2);
-    display: block;
-  }
-
-  /* Quality toggle */
-  .quality-row {
-    display: flex;
-    gap: 8px;
-    margin-top: 16px;
-    align-items: center;
-  }
-
-  .quality-row label {
-    font-size: 0.8rem;
-    color: var(--muted);
-    margin-right: 4px;
-  }
-
-  .toggle-group {
-    display: flex;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .toggle-group button {
-    padding: 6px 14px;
-    background: none;
-    border: none;
-    color: var(--muted);
-    font-family: 'Syne', sans-serif;
-    font-size: 0.78rem;
-    font-weight: 700;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
-  }
-
-  .toggle-group button.active {
-    background: var(--accent);
-    color: #000;
-  }
-
-  footer {
-    margin-top: 60px;
-    text-align: center;
-    color: var(--muted);
-    font-size: 0.75rem;
-    opacity: 0.5;
-  }
+  footer { margin-top: 60px; text-align: center; color: var(--muted); font-size: 0.75rem; opacity: 0.5; }
 
   @media (max-width: 480px) {
     .preview-grid { grid-template-columns: 1fr; }
@@ -419,8 +200,14 @@
 <div class="wrapper">
   <header>
     <div class="logo">STAMP<span>SCALE</span></div>
-    <p class="tagline">LINEスタンプ用 画像リサイザー</p>
+    <p class="tagline">LINEスタンプ用 AIアップスケーラー</p>
   </header>
+
+  <!-- AI Status -->
+  <div class="ai-banner">
+    <div class="ai-dot loading" id="aiDot"></div>
+    <div class="ai-label" id="aiLabel"><strong>AI モデル</strong>を読み込み中…（初回のみ時間がかかります）</div>
+  </div>
 
   <!-- Drop Zone -->
   <div class="drop-zone" id="dropZone">
@@ -457,22 +244,12 @@
         <span class="preset-desc">任意のサイズ</span>
       </button>
     </div>
-
     <div class="custom-row" id="customRow" style="display:none">
       <label>W</label>
       <input type="number" id="customW" placeholder="370" value="370" min="1" max="4000">
       <label>H</label>
       <input type="number" id="customH" placeholder="320" value="320" min="1" max="4000">
       <label>px</label>
-    </div>
-
-    <div class="quality-row">
-      <label>アップスケール方式：</label>
-      <div class="toggle-group">
-        <button class="active" id="qStep" onclick="setQuality('step')">高品質（段階）</button>
-        <button id="qSmooth" onclick="setQuality('smooth')">標準</button>
-        <button id="qPixelated" onclick="setQuality('pixelated')">ピクセル</button>
-      </div>
     </div>
   </div>
 
@@ -487,16 +264,20 @@
         <div class="preview-info" id="originalInfo">—</div>
       </div>
       <div class="preview-card">
-        <div class="preview-card-label">変換後</div>
-        <div class="preview-img-wrap">
-          <canvas id="outputCanvas"></canvas>
+        <div class="preview-card-label">AI処理後</div>
+        <div class="preview-img-wrap" id="outputWrap">
+          <div class="processing-overlay" id="processingOverlay">
+            <div class="spinner"></div>
+            <div class="processing-text" id="processingText">AI処理中…</div>
+          </div>
+          <canvas id="outputCanvas" style="display:none"></canvas>
         </div>
         <div class="preview-info" id="outputInfo">—</div>
       </div>
     </div>
 
     <div class="action-row">
-      <button class="btn-primary" onclick="downloadImage()">⬇ PNGダウンロード</button>
+      <button class="btn-primary" id="downloadBtn" onclick="downloadImage()" disabled>⬇ PNGダウンロード</button>
       <button class="btn-secondary" onclick="resetAll()">リセット</button>
     </div>
     <div class="status-bar" id="statusBar"></div>
@@ -511,12 +292,30 @@
   let currentFile = null;
   let currentImg = null;
   let targetW = 370, targetH = 320;
-  let quality = 'step';
+  let upscaler = null;
+  let aiReady = false;
+  let outputBlob = null;
+
+  // UpscalerJS 初期化
+  async function initAI() {
+    try {
+      upscaler = new Upscaler({ model: ESRGANMedium });
+      // ウォームアップ
+      await upscaler.warmup([{ patchSize: 64, padding: 2 }]);
+      aiReady = true;
+      document.getElementById('aiDot').className = 'ai-dot ready';
+      document.getElementById('aiLabel').innerHTML = '<strong>AI モデル</strong> 準備完了 — ESRGANイラスト超解像';
+    } catch(e) {
+      document.getElementById('aiDot').className = 'ai-dot error';
+      document.getElementById('aiLabel').innerHTML = '<strong>AI モデル</strong> 読み込み失敗 — 標準リサイズで動作します';
+      console.warn('Upscaler init failed:', e);
+    }
+  }
+  initAI();
 
   // Drop zone
   const dropZone = document.getElementById('dropZone');
   const fileInput = document.getElementById('fileInput');
-
   dropZone.addEventListener('click', () => fileInput.click());
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
@@ -530,16 +329,19 @@
 
   function loadFile(file) {
     currentFile = file;
+    outputBlob = null;
+    document.getElementById('downloadBtn').disabled = true;
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
       currentImg = img;
       document.getElementById('originalPreview').src = url;
       const kb = (file.size / 1024).toFixed(1);
-      document.getElementById('originalInfo').innerHTML = `<strong>${img.naturalWidth} × ${img.naturalHeight}px</strong> / ${kb}KB`;
+      document.getElementById('originalInfo').innerHTML =
+        `<strong>${img.naturalWidth} × ${img.naturalHeight}px</strong> / ${kb}KB`;
       document.getElementById('settings').classList.add('visible');
       document.getElementById('previewArea').classList.add('visible');
-      renderOutput();
+      processImage();
     };
     img.src = url;
   }
@@ -549,8 +351,7 @@
     btn.addEventListener('click', () => {
       document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      const w = parseInt(btn.dataset.w);
-      const h = parseInt(btn.dataset.h);
+      const w = parseInt(btn.dataset.w), h = parseInt(btn.dataset.h);
       const customRow = document.getElementById('customRow');
       if (w === 0) {
         customRow.style.display = 'flex';
@@ -560,169 +361,145 @@
         customRow.style.display = 'none';
         targetW = w; targetH = h;
       }
-      if (currentImg) renderOutput();
+      if (currentImg) processImage();
     });
   });
+  document.getElementById('customW').addEventListener('input', e => { targetW = parseInt(e.target.value)||370; if(currentImg) processImage(); });
+  document.getElementById('customH').addEventListener('input', e => { targetH = parseInt(e.target.value)||320; if(currentImg) processImage(); });
 
-  document.getElementById('customW').addEventListener('input', e => { targetW = parseInt(e.target.value) || 370; if (currentImg) renderOutput(); });
-  document.getElementById('customH').addEventListener('input', e => { targetH = parseInt(e.target.value) || 320; if (currentImg) renderOutput(); });
+  // メイン処理
+  async function processImage() {
+    if (!currentImg) return;
+    outputBlob = null;
+    document.getElementById('downloadBtn').disabled = true;
 
-  function setQuality(q) {
-    quality = q;
-    ['qStep','qSmooth','qPixelated'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.classList.remove('active');
-    });
-    const map = { step: 'qStep', smooth: 'qSmooth', pixelated: 'qPixelated' };
-    document.getElementById(map[q]).classList.add('active');
-    if (currentImg) renderOutput();
+    // スピナー表示
+    const overlay = document.getElementById('processingOverlay');
+    const outCanvas = document.getElementById('outputCanvas');
+    overlay.classList.add('visible');
+    outCanvas.style.display = 'none';
+    document.getElementById('outputInfo').innerHTML = '—';
+
+    try {
+      let upscaledCanvas;
+
+      if (aiReady && upscaler) {
+        document.getElementById('processingText').textContent = 'AI超解像処理中…';
+        // UpscalerJS でアップスケール
+        const result = await upscaler.upscale(currentImg, {
+          output: 'canvas',
+          patchSize: 64,
+          padding: 2,
+        });
+        upscaledCanvas = result;
+      } else {
+        // フォールバック: 段階的リサイズ
+        document.getElementById('processingText').textContent = 'リサイズ中…';
+        upscaledCanvas = steppedUpscale(currentImg, currentImg.naturalWidth * 2, currentImg.naturalHeight * 2);
+      }
+
+      // 縦横比を維持してターゲットサイズに収める（透明背景）
+      const finalCanvas = fitToCanvas(upscaledCanvas, targetW, targetH);
+
+      // プレビュー表示
+      const maxDisplay = 200;
+      const scale = Math.min(maxDisplay / targetW, maxDisplay / targetH, 1);
+      outCanvas.width = Math.round(targetW * scale);
+      outCanvas.height = Math.round(targetH * scale);
+      outCanvas.getContext('2d').drawImage(finalCanvas, 0, 0, outCanvas.width, outCanvas.height);
+      outCanvas.style.display = 'block';
+
+      // 処理用キャンバスに保存
+      const proc = document.getElementById('processingCanvas');
+      proc.width = targetW; proc.height = targetH;
+      proc.getContext('2d').drawImage(finalCanvas, 0, 0);
+
+      // BlobをキャッシュしてDL用に
+      proc.toBlob(blob => {
+        outputBlob = blob;
+        const kb = (blob.size / 1024).toFixed(1);
+        const warn = blob.size > 1024 * 1024;
+        document.getElementById('outputInfo').innerHTML =
+          `<strong>${targetW} × ${targetH}px</strong> / 約${kb}KB${warn ? ' <span style="color:var(--accent2)">⚠ 1MB超</span>' : ''}`;
+        const bar = document.getElementById('statusBar');
+        bar.className = warn ? 'status-bar warning' : 'status-bar success';
+        bar.textContent = warn
+          ? '⚠ ファイルサイズが1MBを超えています。LINEスタンプの上限は1MBです。'
+          : '✓ LINEスタンプのサイズ要件を満たしています。';
+        document.getElementById('downloadBtn').disabled = false;
+      }, 'image/png');
+
+    } catch(err) {
+      console.error(err);
+      document.getElementById('processingText').textContent = 'エラーが発生しました';
+    } finally {
+      overlay.classList.remove('visible');
+    }
   }
 
-  // 段階的アップスケール（1.5倍ずつ拡大してから最終サイズへ）
+  // 縦横比維持・透明背景でフィット
+  function fitToCanvas(src, destW, destH) {
+    const canvas = document.createElement('canvas');
+    canvas.width = destW;
+    canvas.height = destH;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, destW, destH); // 透明背景
+
+    const srcW = src.width || src.naturalWidth;
+    const srcH = src.height || src.naturalHeight;
+    const scale = Math.min(destW / srcW, destH / srcH);
+    const drawW = Math.round(srcW * scale);
+    const drawH = Math.round(srcH * scale);
+    const offsetX = Math.round((destW - drawW) / 2);
+    const offsetY = Math.round((destH - drawH) / 2);
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, offsetX, offsetY, drawW, drawH);
+    return canvas;
+  }
+
+  // フォールバック: 段階的アップスケール
   function steppedUpscale(img, destW, destH) {
-    let srcW = img.naturalWidth;
-    let srcH = img.naturalHeight;
-
-    // 最初のキャンバスに元画像を描画
+    let srcW = img.naturalWidth, srcH = img.naturalHeight;
     let canvas = document.createElement('canvas');
-    canvas.width = srcW;
-    canvas.height = srcH;
-    let ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-
-    // 目標より小さい間、1.5倍ずつ拡大
+    canvas.width = srcW; canvas.height = srcH;
+    canvas.getContext('2d').drawImage(img, 0, 0);
     while (srcW < destW * 0.9 || srcH < destH * 0.9) {
       const nextW = Math.min(Math.round(srcW * 1.5), destW * 2);
       const nextH = Math.min(Math.round(srcH * 1.5), destH * 2);
       const next = document.createElement('canvas');
-      next.width = nextW;
-      next.height = nextH;
+      next.width = nextW; next.height = nextH;
       const nctx = next.getContext('2d');
       nctx.imageSmoothingEnabled = true;
       nctx.imageSmoothingQuality = 'high';
       nctx.drawImage(canvas, 0, 0, nextW, nextH);
-      canvas = next;
-      srcW = nextW;
-      srcH = nextH;
+      canvas = next; srcW = nextW; srcH = nextH;
       if (srcW >= destW && srcH >= destH) break;
     }
-
-    // 最終サイズに描画
-    const final = document.createElement('canvas');
-    final.width = destW;
-    final.height = destH;
-    const fctx = final.getContext('2d');
-    fctx.imageSmoothingEnabled = true;
-    fctx.imageSmoothingQuality = 'high';
-    fctx.drawImage(canvas, 0, 0, destW, destH);
-    return final;
-  }
-
-  // アンシャープマスク（シャープネス強調）
-  function unsharpMask(canvas, amount = 0.4, radius = 1, threshold = 10) {
-    const w = canvas.width, h = canvas.height;
-    const ctx = canvas.getContext('2d');
-    const original = ctx.getImageData(0, 0, w, h);
-    const data = original.data;
-
-    // ぼかしキャンバス作成
-    const blurred = document.createElement('canvas');
-    blurred.width = w; blurred.height = h;
-    const bctx = blurred.getContext('2d');
-    bctx.filter = `blur(${radius}px)`;
-    bctx.drawImage(canvas, 0, 0);
-    const blurData = bctx.getImageData(0, 0, w, h).data;
-
-    const output = ctx.createImageData(w, h);
-    const out = output.data;
-
-    for (let i = 0; i < data.length; i += 4) {
-      for (let c = 0; c < 3; c++) {
-        const orig = data[i + c];
-        const blur = blurData[i + c];
-        const diff = orig - blur;
-        if (Math.abs(diff) > threshold) {
-          out[i + c] = Math.min(255, Math.max(0, orig + diff * amount));
-        } else {
-          out[i + c] = orig;
-        }
-      }
-      out[i + 3] = data[i + 3]; // alpha
-    }
-    ctx.putImageData(output, 0, 0);
     return canvas;
   }
 
-  function renderOutput() {
-    if (!currentImg || !targetW || !targetH) return;
-
-    let resultCanvas;
-
-    if (quality === 'step') {
-      resultCanvas = steppedUpscale(currentImg, targetW, targetH);
-      unsharpMask(resultCanvas, 0.5, 1, 8);
-    } else {
-      resultCanvas = document.createElement('canvas');
-      resultCanvas.width = targetW;
-      resultCanvas.height = targetH;
-      const ctx = resultCanvas.getContext('2d');
-      ctx.imageSmoothingEnabled = quality === 'smooth';
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(currentImg, 0, 0, targetW, targetH);
-    }
-
-    // 処理用キャンバスに反映
-    const procCanvas = document.getElementById('processingCanvas');
-    procCanvas.width = targetW;
-    procCanvas.height = targetH;
-    procCanvas.getContext('2d').drawImage(resultCanvas, 0, 0);
-
-    // プレビュー表示
-    const outCanvas = document.getElementById('outputCanvas');
-    const maxDisplay = 200;
-    const scale = Math.min(maxDisplay / targetW, maxDisplay / targetH, 1);
-    outCanvas.width = Math.round(targetW * scale);
-    outCanvas.height = Math.round(targetH * scale);
-    outCanvas.getContext('2d').drawImage(resultCanvas, 0, 0, outCanvas.width, outCanvas.height);
-
-    // サイズ計算
-    procCanvas.toBlob(blob => {
-      const kb = (blob.size / 1024).toFixed(1);
-      const warn = blob.size > 1024 * 1024;
-      document.getElementById('outputInfo').innerHTML =
-        `<strong>${targetW} × ${targetH}px</strong> / 約${kb}KB${warn ? ' <span style="color:var(--accent2)">⚠ 1MB超</span>' : ''}`;
-      const bar = document.getElementById('statusBar');
-      if (warn) {
-        bar.className = 'status-bar warning';
-        bar.textContent = '⚠ ファイルサイズが1MBを超えています。LINEスタンプの上限は1MBです。';
-      } else {
-        bar.className = 'status-bar success';
-        bar.textContent = '✓ LINEスタンプのサイズ要件を満たしています。';
-      }
-    }, 'image/png');
-  }
-
   function downloadImage() {
-    if (!currentImg) return;
-    const procCanvas = document.getElementById('processingCanvas');
-    procCanvas.toBlob(blob => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      const base = currentFile.name.replace(/\.[^.]+$/, '');
-      a.download = `${base}_${targetW}x${targetH}.png`;
-      a.href = url;
-      a.click();
-      URL.revokeObjectURL(url);
-    }, 'image/png');
+    if (!outputBlob) return;
+    const url = URL.createObjectURL(outputBlob);
+    const a = document.createElement('a');
+    const base = currentFile.name.replace(/\.[^.]+$/, '');
+    a.download = `${base}_${targetW}x${targetH}.png`;
+    a.href = url;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   function resetAll() {
-    currentFile = null; currentImg = null;
+    currentFile = null; currentImg = null; outputBlob = null;
     document.getElementById('fileInput').value = '';
     document.getElementById('originalPreview').src = '';
     document.getElementById('settings').classList.remove('visible');
     document.getElementById('previewArea').classList.remove('visible');
     document.getElementById('statusBar').className = 'status-bar';
+    document.getElementById('downloadBtn').disabled = true;
+    document.getElementById('outputCanvas').style.display = 'none';
   }
 </script>
 </body>
