@@ -3,504 +3,957 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>STAMP SCALE — LINEスタンプ用AIアップスケーラー</title>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Noto+Sans+JP:wght@300;400;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-medium@1.0.0-beta.13/dist/umd/index.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/upscaler@1.0.0-beta.19/dist/browser/umd/upscaler.min.js"></script>
+<title>IllustClear — イラスト鮮明化</title>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@300;400;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0d0d0f;
-    --surface: #16161a;
-    --border: #2a2a30;
-    --accent: #00e5a0;
-    --accent2: #ff6b6b;
-    --text: #f0f0f0;
-    --muted: #888;
-    --radius: 16px;
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --panel: #1a1a26;
+    --border: #2a2a3f;
+    --accent: #7fff6e;
+    --accent2: #6ee8ff;
+    --accent3: #ff6eb4;
+    --text: #e8e8f4;
+    --muted: #6a6a8a;
+    --glow: rgba(127,255,110,0.15);
   }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: 'Noto Sans JP', sans-serif;
+    font-family: 'Zen Kaku Gothic New', sans-serif;
     min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 40px 20px;
+    overflow-x: hidden;
   }
+
+  /* background grid */
   body::before {
     content: '';
     position: fixed;
     inset: 0;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    background-image:
+      linear-gradient(rgba(127,255,110,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(127,255,110,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
     pointer-events: none;
     z-index: 0;
-    opacity: 0.4;
   }
-  .wrapper { position: relative; z-index: 1; width: 100%; max-width: 800px; }
-  header { text-align: center; margin-bottom: 48px; }
-  .logo {
-    font-family: 'Syne', sans-serif;
-    font-weight: 800;
-    font-size: clamp(2.4rem, 6vw, 4rem);
-    letter-spacing: -0.03em;
-    line-height: 1;
-  }
-  .logo span { color: var(--accent); }
-  .tagline { margin-top: 10px; color: var(--muted); font-size: 0.85rem; letter-spacing: 0.1em; text-transform: uppercase; }
 
-  /* AI Loading banner */
-  .ai-banner {
+  .app {
+    position: relative;
+    z-index: 1;
+    max-width: 1300px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  /* Header */
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-bottom: 48px;
+  }
+
+  .logo {
+    font-family: 'Space Mono', monospace;
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    color: var(--accent);
+    text-shadow: 0 0 30px var(--accent);
+  }
+
+  .logo span { color: var(--text); }
+
+  .tagline {
+    font-size: 13px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    border-left: 2px solid var(--border);
+    padding-left: 16px;
+  }
+
+  /* Layout */
+  .workspace {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 24px;
+    align-items: start;
+  }
+
+  /* Canvas area */
+  .canvas-area {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px 20px;
-    margin-bottom: 24px;
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .canvas-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+
+  .tab-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 12px 20px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+  }
+
+  .tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  .tab-btn:hover:not(.active) { color: var(--text); }
+
+  .canvas-wrap {
+    min-height: 480px;
     display: flex;
     align-items: center;
-    gap: 12px;
-    font-size: 0.85rem;
-  }
-  .ai-dot {
-    width: 10px; height: 10px;
-    border-radius: 50%;
-    background: var(--muted);
-    flex-shrink: 0;
-    transition: background 0.3s;
-  }
-  .ai-dot.loading { background: #f0c040; animation: pulse 1s infinite; }
-  .ai-dot.ready { background: var(--accent); }
-  .ai-dot.error { background: var(--accent2); }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-  .ai-label { color: var(--muted); }
-  .ai-label strong { color: var(--text); }
-
-  /* Drop zone */
-  .drop-zone {
-    border: 2px dashed var(--border);
-    border-radius: var(--radius);
-    padding: 60px 40px;
-    text-align: center;
-    cursor: pointer;
-    transition: border-color 0.2s, background 0.2s;
-    background: var(--surface);
+    justify-content: center;
+    padding: 24px;
     position: relative;
-    overflow: hidden;
   }
-  .drop-zone::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(ellipse at center, rgba(0,229,160,0.05) 0%, transparent 70%);
-    opacity: 0;
-    transition: opacity 0.3s;
-  }
-  .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); }
-  .drop-zone:hover::after, .drop-zone.drag-over::after { opacity: 1; }
-  .drop-icon { font-size: 3rem; margin-bottom: 16px; display: block; animation: float 3s ease-in-out infinite; }
-  @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
-  .drop-text { font-size: 1rem; color: var(--muted); }
-  .drop-text strong { color: var(--accent); font-weight: 700; }
-  #fileInput { display: none; }
 
-  /* Settings */
-  .settings { margin-top: 32px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; display: none; }
-  .settings.visible { display: block; }
-  .settings-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.75rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); margin-bottom: 20px; }
-  .preset-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 20px; }
-  .preset-btn {
-    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
-    padding: 14px 12px; color: var(--text); cursor: pointer;
-    font-family: 'Noto Sans JP', sans-serif; transition: border-color 0.2s, background 0.2s; text-align: left;
-  }
-  .preset-btn:hover { border-color: var(--accent); }
-  .preset-btn.active { border-color: var(--accent); background: rgba(0,229,160,0.08); }
-  .preset-label { font-size: 0.7rem; color: var(--accent); font-family: 'Syne', sans-serif; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; display: block; margin-bottom: 4px; }
-  .preset-size { font-size: 1.1rem; font-family: 'Syne', sans-serif; font-weight: 700; }
-  .preset-desc { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
-  .custom-row { display: flex; gap: 10px; align-items: center; }
-  .custom-row label { font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
-  .custom-row input {
-    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
-    padding: 8px 12px; color: var(--text); font-family: 'Syne', sans-serif;
-    font-size: 0.9rem; width: 90px; transition: border-color 0.2s;
-  }
-  .custom-row input:focus { outline: none; border-color: var(--accent); }
-
-  /* Preview */
-  .preview-area { margin-top: 32px; display: none; }
-  .preview-area.visible { display: block; }
-  .preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .preview-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; }
-  .preview-card-label { font-size: 0.7rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-family: 'Syne', sans-serif; font-weight: 700; margin-bottom: 14px; }
-  .preview-img-wrap {
-    display: flex; align-items: center; justify-content: center;
-    min-height: 160px;
-    background: repeating-conic-gradient(#1e1e22 0% 25%, #16161a 0% 50%) 0 0 / 16px 16px;
-    border-radius: 8px; overflow: hidden; margin-bottom: 12px;
-  }
-  .preview-img-wrap img, .preview-img-wrap canvas { max-width: 100%; max-height: 200px; object-fit: contain; display: block; }
-  .preview-info { font-size: 0.8rem; color: var(--muted); }
-  .preview-info strong { color: var(--text); font-family: 'Syne', sans-serif; }
-
-  /* Processing overlay */
-  .processing-overlay {
-    display: none;
+  .drop-zone {
+    width: 100%;
+    min-height: 420px;
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 12px;
-    min-height: 160px;
+    gap: 16px;
+    cursor: pointer;
+    transition: all 0.3s;
+    position: relative;
   }
-  .processing-overlay.visible { display: flex; }
-  .spinner {
-    width: 40px; height: 40px;
-    border: 3px solid var(--border);
-    border-top-color: var(--accent);
+
+  .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(127,255,110,0.04);
+    box-shadow: inset 0 0 40px rgba(127,255,110,0.05);
+  }
+
+  .drop-icon {
+    width: 64px;
+    height: 64px;
     border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    background: var(--panel);
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    transition: all 0.3s;
   }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .processing-text { font-size: 0.82rem; color: var(--accent); font-family: 'Syne', sans-serif; }
 
-  /* Action */
-  .action-row { margin-top: 24px; display: flex; gap: 12px; align-items: center; }
+  .drop-zone:hover .drop-icon {
+    border-color: var(--accent);
+    box-shadow: 0 0 20px var(--glow);
+  }
+
+  .drop-text {
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.8;
+  }
+
+  .drop-text strong {
+    color: var(--text);
+    display: block;
+    font-size: 16px;
+    margin-bottom: 4px;
+  }
+
+  .upload-btn {
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    padding: 10px 24px;
+    border-radius: 6px;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+
+  .upload-btn:hover {
+    background: #9fff90;
+    box-shadow: 0 0 20px rgba(127,255,110,0.4);
+    transform: translateY(-1px);
+  }
+
+  #fileInput { display: none; }
+
+  /* Canvas display */
+  .canvas-display {
+    display: none;
+    width: 100%;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .canvas-display.visible { display: flex; }
+
+  .canvas-viewer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .canvas-pane {
+    background: var(--surface);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .pane-label {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(10,10,15,0.85);
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    z-index: 2;
+    text-transform: uppercase;
+  }
+
+  canvas {
+    width: 100%;
+    height: auto;
+    display: block;
+    max-height: 480px;
+    object-fit: contain;
+  }
+
+  /* Slider panel */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    background: var(--panel);
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .panel-body { padding: 20px; }
+
+  .control-group {
+    margin-bottom: 28px;
+  }
+
+  .control-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  .control-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: 0.5px;
+  }
+
+  .control-value {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    background: var(--panel);
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    min-width: 44px;
+    text-align: center;
+  }
+
+  .control-desc {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 8px;
+    line-height: 1.5;
+  }
+
+  /* Custom slider */
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px rgba(127,255,110,0.5);
+    border: 2px solid var(--bg);
+    transition: transform 0.15s;
+  }
+
+  input[type=range]:hover::-webkit-slider-thumb {
+    transform: scale(1.2);
+    box-shadow: 0 0 16px rgba(127,255,110,0.7);
+  }
+
+  .slider-accent2 { --thumb-color: var(--accent2); }
+  .slider-accent2::-webkit-slider-thumb {
+    background: var(--accent2);
+    box-shadow: 0 0 8px rgba(110,232,255,0.5);
+  }
+  .slider-accent3::-webkit-slider-thumb {
+    background: var(--accent3);
+    box-shadow: 0 0 8px rgba(255,110,180,0.5);
+  }
+
+  /* Divider */
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 8px 0 24px;
+  }
+
+  /* Buttons */
+  .btn-row {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
   .btn-primary {
-    background: var(--accent); color: #000; border: none; border-radius: 10px;
-    padding: 14px 32px; font-family: 'Syne', sans-serif; font-weight: 700;
-    font-size: 0.95rem; cursor: pointer; letter-spacing: 0.04em;
-    transition: transform 0.15s, box-shadow 0.15s; flex: 1;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    padding: 14px;
+    border-radius: 8px;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    width: 100%;
   }
-  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,229,160,0.3); }
-  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+  .btn-primary:hover {
+    background: #9fff90;
+    box-shadow: 0 4px 20px rgba(127,255,110,0.35);
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
   .btn-secondary {
-    background: transparent; color: var(--muted); border: 1px solid var(--border);
-    border-radius: 10px; padding: 14px 20px; font-family: 'Syne', sans-serif;
-    font-size: 0.85rem; cursor: pointer; transition: border-color 0.2s, color 0.2s;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 11px;
+    border-radius: 8px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    width: 100%;
   }
-  .btn-secondary:hover { border-color: var(--accent2); color: var(--accent2); }
 
-  /* Status */
-  .status-bar { margin-top: 20px; padding: 12px 16px; border-radius: 10px; font-size: 0.82rem; display: none; }
-  .status-bar.success { background: rgba(0,229,160,0.1); border: 1px solid rgba(0,229,160,0.3); color: var(--accent); display: block; }
-  .status-bar.warning { background: rgba(255,107,107,0.1); border: 1px solid rgba(255,107,107,0.3); color: var(--accent2); display: block; }
+  .btn-secondary:hover {
+    border-color: var(--text);
+    color: var(--text);
+  }
 
-  footer { margin-top: 60px; text-align: center; color: var(--muted); font-size: 0.75rem; opacity: 0.5; }
+  .btn-secondary:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
 
-  @media (max-width: 480px) {
-    .preview-grid { grid-template-columns: 1fr; }
-    .preset-grid { grid-template-columns: 1fr 1fr; }
-    .custom-row { flex-wrap: wrap; }
+  /* Processing indicator */
+  .processing-bar {
+    height: 2px;
+    background: var(--border);
+    border-radius: 1px;
+    overflow: hidden;
+    margin-top: 10px;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .processing-bar.active { opacity: 1; }
+
+  .processing-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    width: 0%;
+    transition: width 0.4s ease;
+    border-radius: 1px;
+  }
+
+  /* Format selector */
+  .format-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+
+  .fmt-btn {
+    flex: 1;
+    padding: 8px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+  }
+
+  .fmt-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(127,255,110,0.06);
+  }
+
+  /* Stats strip */
+  .stats-strip {
+    display: flex;
+    gap: 2px;
+    padding: 14px 20px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.5px;
+  }
+
+  .stat { flex: 1; text-align: center; }
+  .stat strong { display: block; color: var(--text); font-size: 13px; margin-bottom: 2px; }
+
+  /* Preset chips */
+  .presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 20px;
+  }
+
+  .preset-chip {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-size: 11px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: 'Zen Kaku Gothic New', sans-serif;
+  }
+
+  .preset-chip:hover {
+    border-color: var(--accent2);
+    color: var(--accent2);
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .workspace { grid-template-columns: 1fr; }
+    .canvas-viewer { grid-template-columns: 1fr; }
   }
 </style>
 </head>
 <body>
-<div class="wrapper">
+<div class="app">
   <header>
-    <div class="logo">STAMP<span>SCALE</span></div>
-    <p class="tagline">LINEスタンプ用 AIアップスケーラー</p>
+    <div class="logo">Illust<span>Clear</span></div>
+    <div class="tagline">イラスト鮮明化エンジン</div>
   </header>
 
-  <!-- AI Status -->
-  <div class="ai-banner">
-    <div class="ai-dot loading" id="aiDot"></div>
-    <div class="ai-label" id="aiLabel"><strong>AI モデル</strong>を読み込み中…（初回のみ時間がかかります）</div>
-  </div>
-
-  <!-- Drop Zone -->
-  <div class="drop-zone" id="dropZone">
-    <span class="drop-icon">🖼️</span>
-    <div class="drop-text">
-      <strong>クリックまたはドラッグ</strong>で画像をアップロード<br>
-      PNG / JPEG / GIF / WebP 対応
-    </div>
-    <input type="file" id="fileInput" accept="image/*">
-  </div>
-
-  <!-- Settings -->
-  <div class="settings" id="settings">
-    <div class="settings-title">📐 出力サイズを選択</div>
-    <div class="preset-grid">
-      <button class="preset-btn active" data-w="370" data-h="320">
-        <span class="preset-label">メインスタンプ</span>
-        <span class="preset-size">370 × 320</span>
-        <span class="preset-desc">標準スタンプ（必須）</span>
-      </button>
-      <button class="preset-btn" data-w="240" data-h="240">
-        <span class="preset-label">スタンプキー画像</span>
-        <span class="preset-size">240 × 240</span>
-        <span class="preset-desc">ショップ一覧表示用</span>
-      </button>
-      <button class="preset-btn" data-w="96" data-h="74">
-        <span class="preset-label">トークアイコン</span>
-        <span class="preset-size">96 × 74</span>
-        <span class="preset-desc">トーク画面小表示</span>
-      </button>
-      <button class="preset-btn" data-w="0" data-h="0">
-        <span class="preset-label">カスタム</span>
-        <span class="preset-size">自由設定</span>
-        <span class="preset-desc">任意のサイズ</span>
-      </button>
-    </div>
-    <div class="custom-row" id="customRow" style="display:none">
-      <label>W</label>
-      <input type="number" id="customW" placeholder="370" value="370" min="1" max="4000">
-      <label>H</label>
-      <input type="number" id="customH" placeholder="320" value="320" min="1" max="4000">
-      <label>px</label>
-    </div>
-  </div>
-
-  <!-- Preview -->
-  <div class="preview-area" id="previewArea">
-    <div class="preview-grid">
-      <div class="preview-card">
-        <div class="preview-card-label">元画像</div>
-        <div class="preview-img-wrap">
-          <img id="originalPreview" src="" alt="original">
-        </div>
-        <div class="preview-info" id="originalInfo">—</div>
+  <div class="workspace">
+    <!-- Left: canvas area -->
+    <div class="canvas-area">
+      <div class="canvas-tabs">
+        <button class="tab-btn active" id="tabBefore">BEFORE / AFTER</button>
+        <button class="tab-btn" id="tabResult">処理結果のみ</button>
       </div>
-      <div class="preview-card">
-        <div class="preview-card-label">AI処理後</div>
-        <div class="preview-img-wrap" id="outputWrap">
-          <div class="processing-overlay" id="processingOverlay">
-            <div class="spinner"></div>
-            <div class="processing-text" id="processingText">AI処理中…</div>
+
+      <div class="canvas-wrap">
+        <!-- Drop zone -->
+        <div class="drop-zone" id="dropZone">
+          <div class="drop-icon">🎨</div>
+          <div class="drop-text">
+            <strong>イラストをドロップ</strong>
+            または下のボタンからファイルを選択
           </div>
-          <canvas id="outputCanvas" style="display:none"></canvas>
+          <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+            ファイルを選択
+          </button>
+          <input type="file" id="fileInput" accept="image/*">
         </div>
-        <div class="preview-info" id="outputInfo">—</div>
+
+        <!-- Canvas view -->
+        <div class="canvas-display" id="canvasDisplay">
+          <div class="canvas-viewer" id="canvasViewer">
+            <div class="canvas-pane">
+              <div class="pane-label">ORIGINAL</div>
+              <canvas id="canvasOriginal"></canvas>
+            </div>
+            <div class="canvas-pane" id="resultPane">
+              <div class="pane-label" id="resultLabel">PROCESSED</div>
+              <canvas id="canvasResult"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stats-strip" id="statsStrip" style="display:none">
+        <div class="stat"><strong id="statW">—</strong>幅 (px)</div>
+        <div class="stat"><strong id="statH">—</strong>高さ (px)</div>
+        <div class="stat"><strong id="statSize">—</strong>ファイルサイズ</div>
+        <div class="stat"><strong id="statFormat">—</strong>フォーマット</div>
       </div>
     </div>
 
-    <div class="action-row">
-      <button class="btn-primary" id="downloadBtn" onclick="downloadImage()" disabled>⬇ PNGダウンロード</button>
-      <button class="btn-secondary" onclick="resetAll()">リセット</button>
-    </div>
-    <div class="status-bar" id="statusBar"></div>
-  </div>
+    <!-- Right: controls -->
+    <div class="panel">
+      <div class="panel-header">調整パラメータ</div>
+      <div class="panel-body">
 
-  <footer>画像はすべてブラウザ内で処理されます。サーバーへの送信なし。</footer>
+        <!-- Presets -->
+        <div style="margin-bottom:6px;font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;font-family:'Space Mono',monospace;">プリセット</div>
+        <div class="presets">
+          <div class="preset-chip" onclick="applyPreset('anime')">アニメ風</div>
+          <div class="preset-chip" onclick="applyPreset('manga')">漫画・線画</div>
+          <div class="preset-chip" onclick="applyPreset('watercolor')">水彩イラスト</div>
+          <div class="preset-chip" onclick="applyPreset('crisp')">くっきり</div>
+          <div class="preset-chip" onclick="applyPreset('reset')">リセット</div>
+        </div>
+
+        <hr class="divider">
+
+        <!-- Sharpness -->
+        <div class="control-group">
+          <div class="control-label">
+            <span class="control-name">シャープネス</span>
+            <span class="control-value" id="valSharp">50</span>
+          </div>
+          <div class="control-desc">エッジを強調して線をくっきりさせます</div>
+          <input type="range" id="sliderSharp" min="0" max="100" value="50" oninput="updateVal('valSharp',this.value);processImage()">
+        </div>
+
+        <!-- Clarity -->
+        <div class="control-group">
+          <div class="control-label">
+            <span class="control-name">クラリティ</span>
+            <span class="control-value" id="valClarity">30</span>
+          </div>
+          <div class="control-desc">中間トーンのコントラストを向上させます</div>
+          <input type="range" id="sliderClarity" min="0" max="100" value="30" oninput="updateVal('valClarity',this.value);processImage()">
+        </div>
+
+        <!-- Contrast -->
+        <div class="control-group">
+          <div class="control-label">
+            <span class="control-name">コントラスト</span>
+            <span class="control-value" id="valContrast">0</span>
+          </div>
+          <div class="control-desc">明暗の差を調整します（-50〜+50）</div>
+          <input type="range" id="sliderContrast" min="-50" max="50" value="0" oninput="updateVal('valContrast',this.value);processImage()">
+        </div>
+
+        <!-- Brightness -->
+        <div class="control-group">
+          <div class="control-label">
+            <span class="control-name">明るさ</span>
+            <span class="control-value" id="valBrightness">0</span>
+          </div>
+          <div class="control-desc">全体の明るさを調整します（-50〜+50）</div>
+          <input type="range" id="sliderBrightness" min="-50" max="50" value="0" oninput="updateVal('valBrightness',this.value);processImage()">
+        </div>
+
+        <!-- Saturation -->
+        <div class="control-group">
+          <div class="control-label">
+            <span class="control-name">彩度</span>
+            <span class="control-value" id="valSaturation">0</span>
+          </div>
+          <div class="control-desc">色の鮮やかさを調整します（-50〜+50）</div>
+          <input type="range" id="sliderSaturation" min="-50" max="50" value="0" oninput="updateVal('valSaturation',this.value);processImage()">
+        </div>
+
+        <!-- Noise reduction -->
+        <div class="control-group">
+          <div class="control-label">
+            <span class="control-name">ノイズ除去</span>
+            <span class="control-value" id="valDenoise">0</span>
+          </div>
+          <div class="control-desc">ざらつきを軽減してなめらかにします</div>
+          <input type="range" id="sliderDenoise" min="0" max="100" value="0" oninput="updateVal('valDenoise',this.value);processImage()">
+        </div>
+
+        <hr class="divider">
+
+        <!-- Export format -->
+        <div style="margin-bottom:8px;font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;font-family:'Space Mono',monospace;">書き出し形式</div>
+        <div class="format-row">
+          <div class="fmt-btn active" onclick="setFormat('png',this)">PNG</div>
+          <div class="fmt-btn" onclick="setFormat('jpeg',this)">JPEG</div>
+          <div class="fmt-btn" onclick="setFormat('webp',this)">WebP</div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn-primary" id="btnDownload" onclick="downloadResult()" disabled>
+            ↓ 保存する
+          </button>
+          <button class="btn-secondary" id="btnReset" onclick="resetAll()" disabled>
+            別の画像を読み込む
+          </button>
+        </div>
+
+        <div class="processing-bar" id="procBar">
+          <div class="processing-fill" id="procFill"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
 </div>
 
-<canvas id="processingCanvas" style="display:none"></canvas>
-
 <script>
-  let currentFile = null;
-  let currentImg = null;
-  let targetW = 370, targetH = 320;
-  let upscaler = null;
-  let aiReady = false;
-  let outputBlob = null;
+  let originalImageData = null;
+  let originalImg = null;
+  let exportFormat = 'png';
+  let viewMode = 'split';
+  let processingTimer = null;
 
-  // UpscalerJS 初期化
-  async function initAI() {
-    try {
-      upscaler = new Upscaler({ model: ESRGANMedium });
-      // ウォームアップ
-      await upscaler.warmup([{ patchSize: 64, padding: 2 }]);
-      aiReady = true;
-      document.getElementById('aiDot').className = 'ai-dot ready';
-      document.getElementById('aiLabel').innerHTML = '<strong>AI モデル</strong> 準備完了 — ESRGANイラスト超解像';
-    } catch(e) {
-      document.getElementById('aiDot').className = 'ai-dot error';
-      document.getElementById('aiLabel').innerHTML = '<strong>AI モデル</strong> 読み込み失敗 — 標準リサイズで動作します';
-      console.warn('Upscaler init failed:', e);
-    }
+  // Tab switching
+  document.getElementById('tabBefore').addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.getElementById('tabBefore').classList.add('active');
+    viewMode = 'split';
+    document.getElementById('canvasViewer').style.gridTemplateColumns = '1fr 1fr';
+    document.getElementById('canvasOriginal').parentElement.style.display = '';
+    updateResultLabel();
+  });
+
+  document.getElementById('tabResult').addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.getElementById('tabResult').classList.add('active');
+    viewMode = 'single';
+    document.getElementById('canvasViewer').style.gridTemplateColumns = '1fr';
+    document.getElementById('canvasOriginal').parentElement.style.display = 'none';
+  });
+
+  function updateResultLabel() {
+    document.getElementById('resultLabel').textContent = viewMode === 'split' ? 'PROCESSED' : '処理結果';
   }
-  initAI();
 
-  // Drop zone
+  // Drag & drop
   const dropZone = document.getElementById('dropZone');
-  const fileInput = document.getElementById('fileInput');
-  dropZone.addEventListener('click', () => fileInput.click());
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
   dropZone.addEventListener('drop', e => {
     e.preventDefault();
     dropZone.classList.remove('drag-over');
     const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) loadFile(file);
+    if (file && file.type.startsWith('image/')) loadImage(file);
   });
-  fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+  dropZone.addEventListener('click', () => document.getElementById('fileInput').click());
 
-  function loadFile(file) {
-    currentFile = file;
-    outputBlob = null;
-    document.getElementById('downloadBtn').disabled = true;
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      currentImg = img;
-      document.getElementById('originalPreview').src = url;
-      const kb = (file.size / 1024).toFixed(1);
-      document.getElementById('originalInfo').innerHTML =
-        `<strong>${img.naturalWidth} × ${img.naturalHeight}px</strong> / ${kb}KB`;
-      document.getElementById('settings').classList.add('visible');
-      document.getElementById('previewArea').classList.add('visible');
-      processImage();
+  document.getElementById('fileInput').addEventListener('change', e => {
+    if (e.target.files[0]) loadImage(e.target.files[0]);
+  });
+
+  function loadImage(file) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        originalImg = img;
+
+        // Draw original
+        const canvasOrig = document.getElementById('canvasOriginal');
+        const maxW = 600, maxH = 480;
+        let w = img.width, h = img.height;
+        if (w > maxW) { h = h * maxW / w; w = maxW; }
+        if (h > maxH) { w = w * maxH / h; h = maxH; }
+        canvasOrig.width = img.width;
+        canvasOrig.height = img.height;
+        canvasOrig.style.maxWidth = '100%';
+        const ctx = canvasOrig.getContext('2d');
+        ctx.drawImage(img, 0, 0, img.width, img.height);
+        originalImageData = ctx.getImageData(0, 0, img.width, img.height);
+
+        // Setup result canvas
+        const canvasResult = document.getElementById('canvasResult');
+        canvasResult.width = img.width;
+        canvasResult.height = img.height;
+        canvasResult.style.maxWidth = '100%';
+
+        // Show UI
+        dropZone.style.display = 'none';
+        document.getElementById('canvasDisplay').classList.add('visible');
+        document.getElementById('statsStrip').style.display = 'flex';
+        document.getElementById('btnDownload').disabled = false;
+        document.getElementById('btnReset').disabled = false;
+
+        // Stats
+        document.getElementById('statW').textContent = img.width;
+        document.getElementById('statH').textContent = img.height;
+        document.getElementById('statSize').textContent = formatBytes(file.size);
+        document.getElementById('statFormat').textContent = file.type.split('/')[1].toUpperCase();
+
+        processImage();
+      };
+      img.src = ev.target.result;
     };
-    img.src = url;
+    reader.readAsDataURL(file);
   }
 
-  // Presets
-  document.querySelectorAll('.preset-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const w = parseInt(btn.dataset.w), h = parseInt(btn.dataset.h);
-      const customRow = document.getElementById('customRow');
-      if (w === 0) {
-        customRow.style.display = 'flex';
-        targetW = parseInt(document.getElementById('customW').value) || 370;
-        targetH = parseInt(document.getElementById('customH').value) || 320;
-      } else {
-        customRow.style.display = 'none';
-        targetW = w; targetH = h;
-      }
-      if (currentImg) processImage();
-    });
-  });
-  document.getElementById('customW').addEventListener('input', e => { targetW = parseInt(e.target.value)||370; if(currentImg) processImage(); });
-  document.getElementById('customH').addEventListener('input', e => { targetH = parseInt(e.target.value)||320; if(currentImg) processImage(); });
+  function formatBytes(b) {
+    if (b < 1024) return b + 'B';
+    if (b < 1048576) return (b/1024).toFixed(1) + 'KB';
+    return (b/1048576).toFixed(1) + 'MB';
+  }
 
-  // メイン処理
-  async function processImage() {
-    if (!currentImg) return;
-    outputBlob = null;
-    document.getElementById('downloadBtn').disabled = true;
+  function updateVal(id, val) {
+    document.getElementById(id).textContent = val;
+  }
 
-    // スピナー表示
-    const overlay = document.getElementById('processingOverlay');
-    const outCanvas = document.getElementById('outputCanvas');
-    overlay.classList.add('visible');
-    outCanvas.style.display = 'none';
-    document.getElementById('outputInfo').innerHTML = '—';
+  // Process image with filters
+  function processImage() {
+    if (!originalImageData) return;
 
-    try {
-      let upscaledCanvas;
+    // Show processing bar
+    const bar = document.getElementById('procBar');
+    const fill = document.getElementById('procFill');
+    bar.classList.add('active');
+    fill.style.width = '0%';
+    setTimeout(() => fill.style.width = '60%', 50);
 
-      if (aiReady && upscaler) {
-        document.getElementById('processingText').textContent = 'AI超解像処理中…';
-        // UpscalerJS でアップスケール
-        const result = await upscaler.upscale(currentImg, {
-          output: 'canvas',
-          patchSize: 64,
-          padding: 2,
-        });
-        upscaledCanvas = result;
-      } else {
-        // フォールバック: 段階的リサイズ
-        document.getElementById('processingText').textContent = 'リサイズ中…';
-        upscaledCanvas = steppedUpscale(currentImg, currentImg.naturalWidth * 2, currentImg.naturalHeight * 2);
+    // debounce
+    clearTimeout(processingTimer);
+    processingTimer = setTimeout(() => {
+      const sharp = parseInt(document.getElementById('sliderSharp').value);
+      const clarity = parseInt(document.getElementById('sliderClarity').value);
+      const contrast = parseInt(document.getElementById('sliderContrast').value);
+      const brightness = parseInt(document.getElementById('sliderBrightness').value);
+      const saturation = parseInt(document.getElementById('sliderSaturation').value);
+      const denoise = parseInt(document.getElementById('sliderDenoise').value);
+
+      const src = originalImageData;
+      const w = src.width, h = src.height;
+
+      // Step 1: Box blur for denoise
+      let data = new Uint8ClampedArray(src.data);
+      if (denoise > 0) {
+        const radius = Math.max(1, Math.round(denoise / 30));
+        data = boxBlur(data, w, h, radius);
       }
 
-      // 縦横比を維持してターゲットサイズに収める（透明背景）
-      const finalCanvas = fitToCanvas(upscaledCanvas, targetW, targetH);
+      // Step 2: Unsharp mask for sharpness + clarity
+      if (sharp > 0 || clarity > 0) {
+        const sharpAmount = sharp / 100 * 2.5;
+        const clarityAmount = clarity / 100 * 1.2;
+        const blurred = boxBlur(data, w, h, 1);
+        const blurredMid = boxBlur(data, w, h, 4);
+        for (let i = 0; i < data.length; i += 4) {
+          for (let c = 0; c < 3; c++) {
+            const diff = data[i+c] - blurred[i+c];
+            const diffMid = data[i+c] - blurredMid[i+c];
+            data[i+c] = clamp(data[i+c] + diff * sharpAmount + diffMid * clarityAmount);
+          }
+        }
+      }
 
-      // プレビュー表示
-      const maxDisplay = 200;
-      const scale = Math.min(maxDisplay / targetW, maxDisplay / targetH, 1);
-      outCanvas.width = Math.round(targetW * scale);
-      outCanvas.height = Math.round(targetH * scale);
-      outCanvas.getContext('2d').drawImage(finalCanvas, 0, 0, outCanvas.width, outCanvas.height);
-      outCanvas.style.display = 'block';
+      // Step 3: Brightness / Contrast / Saturation
+      const bFactor = brightness * 2.55;
+      const cFactor = (contrast / 50) * 100;
+      const sFactor = (saturation / 50);
 
-      // 処理用キャンバスに保存
-      const proc = document.getElementById('processingCanvas');
-      proc.width = targetW; proc.height = targetH;
-      proc.getContext('2d').drawImage(finalCanvas, 0, 0);
+      for (let i = 0; i < data.length; i += 4) {
+        let r = data[i], g = data[i+1], b = data[i+2];
 
-      // BlobをキャッシュしてDL用に
-      proc.toBlob(blob => {
-        outputBlob = blob;
-        const kb = (blob.size / 1024).toFixed(1);
-        const warn = blob.size > 1024 * 1024;
-        document.getElementById('outputInfo').innerHTML =
-          `<strong>${targetW} × ${targetH}px</strong> / 約${kb}KB${warn ? ' <span style="color:var(--accent2)">⚠ 1MB超</span>' : ''}`;
-        const bar = document.getElementById('statusBar');
-        bar.className = warn ? 'status-bar warning' : 'status-bar success';
-        bar.textContent = warn
-          ? '⚠ ファイルサイズが1MBを超えています。LINEスタンプの上限は1MBです。'
-          : '✓ LINEスタンプのサイズ要件を満たしています。';
-        document.getElementById('downloadBtn').disabled = false;
-      }, 'image/png');
+        // brightness
+        r += bFactor; g += bFactor; b += bFactor;
 
-    } catch(err) {
-      console.error(err);
-      document.getElementById('processingText').textContent = 'エラーが発生しました';
-    } finally {
-      overlay.classList.remove('visible');
+        // contrast: S-curve via luminance
+        r = applyContrast(r, cFactor);
+        g = applyContrast(g, cFactor);
+        b = applyContrast(b, cFactor);
+
+        // saturation: scale chroma
+        if (saturation !== 0) {
+          const gray = 0.299*r + 0.587*g + 0.114*b;
+          r = clamp(gray + (r - gray) * (1 + sFactor));
+          g = clamp(gray + (g - gray) * (1 + sFactor));
+          b = clamp(gray + (b - gray) * (1 + sFactor));
+        }
+
+        data[i] = clamp(r); data[i+1] = clamp(g); data[i+2] = clamp(b);
+      }
+
+      // Output
+      const canvasResult = document.getElementById('canvasResult');
+      const ctx = canvasResult.getContext('2d');
+      const result = new ImageData(data, w, h);
+      ctx.putImageData(result, 0, 0);
+
+      fill.style.width = '100%';
+      setTimeout(() => { bar.classList.remove('active'); fill.style.width = '0%'; }, 300);
+    }, 60);
+  }
+
+  function applyContrast(val, c) {
+    if (c === 0) return val;
+    const factor = (259 * (c + 255)) / (255 * (259 - c));
+    return clamp(factor * (val - 128) + 128);
+  }
+
+  function clamp(v) { return Math.max(0, Math.min(255, Math.round(v))); }
+
+  function boxBlur(data, w, h, radius) {
+    const out = new Uint8ClampedArray(data);
+    const size = radius * 2 + 1;
+    // horizontal pass
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let r=0,g=0,b=0,cnt=0;
+        for (let kx = -radius; kx <= radius; kx++) {
+          const nx = Math.min(w-1, Math.max(0, x+kx));
+          const idx = (y*w+nx)*4;
+          r+=data[idx]; g+=data[idx+1]; b+=data[idx+2]; cnt++;
+        }
+        const oi = (y*w+x)*4;
+        out[oi]=r/cnt; out[oi+1]=g/cnt; out[oi+2]=b/cnt; out[oi+3]=data[oi+3];
+      }
     }
-  }
-
-  // 縦横比維持・透明背景でフィット
-  function fitToCanvas(src, destW, destH) {
-    const canvas = document.createElement('canvas');
-    canvas.width = destW;
-    canvas.height = destH;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, destW, destH); // 透明背景
-
-    const srcW = src.width || src.naturalWidth;
-    const srcH = src.height || src.naturalHeight;
-    const scale = Math.min(destW / srcW, destH / srcH);
-    const drawW = Math.round(srcW * scale);
-    const drawH = Math.round(srcH * scale);
-    const offsetX = Math.round((destW - drawW) / 2);
-    const offsetY = Math.round((destH - drawH) / 2);
-
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(src, offsetX, offsetY, drawW, drawH);
-    return canvas;
-  }
-
-  // フォールバック: 段階的アップスケール
-  function steppedUpscale(img, destW, destH) {
-    let srcW = img.naturalWidth, srcH = img.naturalHeight;
-    let canvas = document.createElement('canvas');
-    canvas.width = srcW; canvas.height = srcH;
-    canvas.getContext('2d').drawImage(img, 0, 0);
-    while (srcW < destW * 0.9 || srcH < destH * 0.9) {
-      const nextW = Math.min(Math.round(srcW * 1.5), destW * 2);
-      const nextH = Math.min(Math.round(srcH * 1.5), destH * 2);
-      const next = document.createElement('canvas');
-      next.width = nextW; next.height = nextH;
-      const nctx = next.getContext('2d');
-      nctx.imageSmoothingEnabled = true;
-      nctx.imageSmoothingQuality = 'high';
-      nctx.drawImage(canvas, 0, 0, nextW, nextH);
-      canvas = next; srcW = nextW; srcH = nextH;
-      if (srcW >= destW && srcH >= destH) break;
+    const out2 = new Uint8ClampedArray(out);
+    // vertical pass
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let r=0,g=0,b=0,cnt=0;
+        for (let ky = -radius; ky <= radius; ky++) {
+          const ny = Math.min(h-1, Math.max(0, y+ky));
+          const idx = (ny*w+x)*4;
+          r+=out[idx]; g+=out[idx+1]; b+=out[idx+2]; cnt++;
+        }
+        const oi = (y*w+x)*4;
+        out2[oi]=r/cnt; out2[oi+1]=g/cnt; out2[oi+2]=b/cnt; out2[oi+3]=out[oi+3];
+      }
     }
-    return canvas;
+    return out2;
   }
 
-  function downloadImage() {
-    if (!outputBlob) return;
-    const url = URL.createObjectURL(outputBlob);
+  function setFormat(fmt, el) {
+    exportFormat = fmt;
+    document.querySelectorAll('.fmt-btn').forEach(b=>b.classList.remove('active'));
+    el.classList.add('active');
+  }
+
+  function downloadResult() {
+    const canvas = document.getElementById('canvasResult');
+    const mimeMap = { png:'image/png', jpeg:'image/jpeg', webp:'image/webp' };
+    const ext = exportFormat;
+    const quality = ext === 'jpeg' ? 0.92 : undefined;
+    const url = canvas.toDataURL(mimeMap[ext], quality);
     const a = document.createElement('a');
-    const base = currentFile.name.replace(/\.[^.]+$/, '');
-    a.download = `${base}_${targetW}x${targetH}.png`;
     a.href = url;
+    a.download = `illust-clear.${ext}`;
     a.click();
-    URL.revokeObjectURL(url);
   }
 
   function resetAll() {
-    currentFile = null; currentImg = null; outputBlob = null;
+    originalImageData = null;
+    originalImg = null;
+    document.getElementById('canvasDisplay').classList.remove('visible');
+    dropZone.style.display = 'flex';
+    document.getElementById('statsStrip').style.display = 'none';
+    document.getElementById('btnDownload').disabled = true;
+    document.getElementById('btnReset').disabled = true;
     document.getElementById('fileInput').value = '';
-    document.getElementById('originalPreview').src = '';
-    document.getElementById('settings').classList.remove('visible');
-    document.getElementById('previewArea').classList.remove('visible');
-    document.getElementById('statusBar').className = 'status-bar';
-    document.getElementById('downloadBtn').disabled = true;
-    document.getElementById('outputCanvas').style.display = 'none';
+    applyPreset('reset');
+  }
+
+  function applyPreset(name) {
+    const presets = {
+      anime:      { sharp:70, clarity:40, contrast:20, brightness:5, saturation:20, denoise:10 },
+      manga:      { sharp:90, clarity:60, contrast:35, brightness:0, saturation:-30, denoise:5 },
+      watercolor: { sharp:30, clarity:20, contrast:10, brightness:8, saturation:30, denoise:40 },
+      crisp:      { sharp:80, clarity:50, contrast:25, brightness:0, saturation:10, denoise:0 },
+      reset:      { sharp:50, clarity:30, contrast:0, brightness:0, saturation:0, denoise:0 },
+    };
+    const p = presets[name];
+    if (!p) return;
+    document.getElementById('sliderSharp').value = p.sharp;
+    document.getElementById('sliderClarity').value = p.clarity;
+    document.getElementById('sliderContrast').value = p.contrast;
+    document.getElementById('sliderBrightness').value = p.brightness;
+    document.getElementById('sliderSaturation').value = p.saturation;
+    document.getElementById('sliderDenoise').value = p.denoise;
+    updateVal('valSharp', p.sharp);
+    updateVal('valClarity', p.clarity);
+    updateVal('valContrast', p.contrast);
+    updateVal('valBrightness', p.brightness);
+    updateVal('valSaturation', p.saturation);
+    updateVal('valDenoise', p.denoise);
+    processImage();
   }
 </script>
 </body>
-</html
+</html>
