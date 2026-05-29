@@ -540,7 +540,7 @@
             <strong>イラストをドロップ</strong>
             または下のボタンからファイルを選択
           </div>
-          <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+          <button class="upload-btn" id="uploadBtn">
             ファイルを選択
           </button>
           <input type="file" id="fileInput" accept="image/*">
@@ -713,7 +713,12 @@
     const file = e.dataTransfer.files[0];
     if (file && file.type.startsWith('image/')) loadImage(file);
   });
-  dropZone.addEventListener('click', () => document.getElementById('fileInput').click());
+
+  // Upload button: stopPropagation prevents drop-zone click from also firing
+  document.getElementById('uploadBtn').addEventListener('click', e => {
+    e.stopPropagation();
+    document.getElementById('fileInput').click();
+  });
 
   document.getElementById('fileInput').addEventListener('change', e => {
     if (e.target.files[0]) loadImage(e.target.files[0]);
