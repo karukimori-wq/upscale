@@ -656,6 +656,26 @@
           <input type="range" id="sliderAntialias" min="0" max="100" value="0" oninput="updateVal('valAntialias',this.value);processImage()">
         </div>
 
+        <!-- Edge Enhance -->
+        <div class="control-group">
+          <div class="control-label">
+            <span class="control-name">輪郭線強調</span>
+            <span class="control-value" id="valEdge">0</span>
+          </div>
+          <div class="control-desc">ふんわりした線をくっきりした輪郭線に強調します</div>
+          <input type="range" id="sliderEdge" min="0" max="100" value="0" oninput="updateVal('valEdge',this.value);processImage()">
+        </div>
+
+        <!-- Line Darken -->
+        <div class="control-group">
+          <div class="control-label">
+            <span class="control-name">線の濃さ</span>
+            <span class="control-value" id="valLineDark">0</span>
+          </div>
+          <div class="control-desc">暗い部分をより黒く引き締めます</div>
+          <input type="range" id="sliderLineDark" min="0" max="100" value="0" oninput="updateVal('valLineDark',this.value);processImage()">
+        </div>
+
         <hr class="divider">
 
         <!-- Export format -->
@@ -811,6 +831,8 @@
       const saturation = parseInt(document.getElementById('sliderSaturation').value);
       const denoise = parseInt(document.getElementById('sliderDenoise').value);
       const antialias = parseInt(document.getElementById('sliderAntialias').value);
+      const edge = parseInt(document.getElementById('sliderEdge').value);
+      const lineDark = parseInt(document.getElementById('sliderLineDark').value);
 
       const src = originalImageData;
       const w = src.width, h = src.height;
@@ -840,6 +862,55 @@
             const diffMid = data[i+c] - blurredMid[i+c];
             data[i+c] = clamp(data[i+c] + diff * sharpAmount + diffMid * clarityAmount);
           }
+        }
+      }
+
+      // Step 2b: Edge enhancement (Sobel-based outline boosting)
+      if (edge > 0) {
+        const edgeAmt = edge / 100;
+        const gray = new Float32Array(w * h);
+        for (let i = 0; i < w * h; i++) {
+          gray[i] = 0.299 * data[i*4] + 0.587 * data[i*4+1] + 0.114 * data[i*4+2];
+        }
+        // Sobel magnitude
+        const mag = new Float32Array(w * h);
+        let maxMag = 0;
+        for (let y = 1; y < h - 1; y++) {
+          for (let x = 1; x < w - 1; x++) {
+            const gx =
+              -gray[(y-1)*w+(x-1)] + gray[(y-1)*w+(x+1)]
+              - 2*gray[y*w+(x-1)]  + 2*gray[y*w+(x+1)]
+              - gray[(y+1)*w+(x-1)] + gray[(y+1)*w+(x+1)];
+            const gy =
+              -gray[(y-1)*w+(x-1)] - 2*gray[(y-1)*w+x] - gray[(y-1)*w+(x+1)]
+              + gray[(y+1)*w+(x-1)] + 2*gray[(y+1)*w+x] + gray[(y+1)*w+(x+1)];
+            mag[y*w+x] = Math.sqrt(gx*gx + gy*gy);
+            if (mag[y*w+x] > maxMag) maxMag = mag[y*w+x];
+          }
+        }
+        // Blend edges: darken pixels where edge magnitude is high
+        if (maxMag > 0) {
+          for (let i = 0; i < w * h; i++) {
+            const t = Math.min(1, (mag[i] / maxMag) * edgeAmt * 3.5);
+            // Push edge pixels toward black (multiply blend)
+            data[i*4]   = clamp(data[i*4]   * (1 - t * 0.85));
+            data[i*4+1] = clamp(data[i*4+1] * (1 - t * 0.85));
+            data[i*4+2] = clamp(data[i*4+2] * (1 - t * 0.85));
+          }
+        }
+      }
+
+      // Step 2c: Line darken — crush shadows toward black
+      if (lineDark > 0) {
+        const gamma = 1 + lineDark / 100 * 1.5; // 1.0 → 2.5
+        const lut = new Uint8ClampedArray(256);
+        for (let v = 0; v < 256; v++) {
+          lut[v] = clamp(Math.pow(v / 255, gamma) * 255);
+        }
+        for (let i = 0; i < data.length; i += 4) {
+          data[i]   = lut[data[i]];
+          data[i+1] = lut[data[i+1]];
+          data[i+2] = lut[data[i+2]];
         }
       }
 
@@ -1009,11 +1080,11 @@
 
   function applyPreset(name) {
     const presets = {
-      anime:      { sharp:60, clarity:35, contrast:20, brightness:5, saturation:20, denoise:10, antialias:40 },
-      manga:      { sharp:80, clarity:55, contrast:35, brightness:0, saturation:-30, denoise:5, antialias:30 },
-      watercolor: { sharp:20, clarity:15, contrast:10, brightness:8, saturation:30, denoise:40, antialias:50 },
-      crisp:      { sharp:75, clarity:45, contrast:25, brightness:0, saturation:10, denoise:0, antialias:20 },
-      reset:      { sharp:50, clarity:30, contrast:0, brightness:0, saturation:0, denoise:0, antialias:0 },
+      anime:      { sharp:60, clarity:35, contrast:20, brightness:5,  saturation:20,  denoise:10, antialias:40, edge:55, lineDark:30 },
+      manga:      { sharp:80, clarity:55, contrast:35, brightness:0,  saturation:-30, denoise:5,  antialias:20, edge:75, lineDark:50 },
+      watercolor: { sharp:20, clarity:15, contrast:10, brightness:8,  saturation:30,  denoise:40, antialias:50, edge:10, lineDark:0  },
+      crisp:      { sharp:75, clarity:45, contrast:25, brightness:0,  saturation:10,  denoise:0,  antialias:20, edge:50, lineDark:25 },
+      reset:      { sharp:50, clarity:30, contrast:0,  brightness:0,  saturation:0,   denoise:0,  antialias:0,  edge:0,  lineDark:0  },
     };
     const p = presets[name];
     if (!p) return;
@@ -1024,6 +1095,8 @@
     document.getElementById('sliderSaturation').value = p.saturation;
     document.getElementById('sliderDenoise').value = p.denoise;
     document.getElementById('sliderAntialias').value = p.antialias;
+    document.getElementById('sliderEdge').value = p.edge;
+    document.getElementById('sliderLineDark').value = p.lineDark;
     updateVal('valSharp', p.sharp);
     updateVal('valClarity', p.clarity);
     updateVal('valContrast', p.contrast);
@@ -1031,6 +1104,8 @@
     updateVal('valSaturation', p.saturation);
     updateVal('valDenoise', p.denoise);
     updateVal('valAntialias', p.antialias);
+    updateVal('valEdge', p.edge);
+    updateVal('valLineDark', p.lineDark);
     processImage();
   }
 </script>
