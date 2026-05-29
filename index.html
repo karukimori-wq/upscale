@@ -646,6 +646,16 @@
           <input type="range" id="sliderDenoise" min="0" max="100" value="0" oninput="updateVal('valDenoise',this.value);processImage()">
         </div>
 
+        <!-- Antialias -->
+        <div class="control-group">
+          <div class="control-label">
+            <span class="control-name">アンチエイリアス</span>
+            <span class="control-value" id="valAntialias">0</span>
+          </div>
+          <div class="control-desc">線のギザギザ（ジャギー）を滑らかにします</div>
+          <input type="range" id="sliderAntialias" min="0" max="100" value="0" oninput="updateVal('valAntialias',this.value);processImage()">
+        </div>
+
         <hr class="divider">
 
         <!-- Export format -->
@@ -800,15 +810,22 @@
       const brightness = parseInt(document.getElementById('sliderBrightness').value);
       const saturation = parseInt(document.getElementById('sliderSaturation').value);
       const denoise = parseInt(document.getElementById('sliderDenoise').value);
+      const antialias = parseInt(document.getElementById('sliderAntialias').value);
 
       const src = originalImageData;
       const w = src.width, h = src.height;
 
-      // Step 1: Box blur for denoise
+      // Step 1: Antialias — gentle gaussian blur to smooth jagged edges
       let data = new Uint8ClampedArray(src.data);
+      if (antialias > 0) {
+        const sigma = antialias / 100 * 1.8;
+        data = gaussianBlur(data, w, h, sigma);
+      }
+
+      // Step 1b: Denoise (stronger gaussian blur)
       if (denoise > 0) {
-        const radius = Math.max(1, Math.round(denoise / 30));
-        data = boxBlur(data, w, h, radius);
+        const sigma = denoise / 100 * 3.0;
+        data = gaussianBlur(data, w, h, sigma);
       }
 
       // Step 2: Unsharp mask for sharpness + clarity
@@ -872,10 +889,66 @@
 
   function clamp(v) { return Math.max(0, Math.min(255, Math.round(v))); }
 
+  // Gaussian kernel generator
+  function makeGaussianKernel(sigma) {
+    const radius = Math.ceil(sigma * 2.5);
+    const size = radius * 2 + 1;
+    const kernel = new Float32Array(size);
+    let sum = 0;
+    for (let i = 0; i < size; i++) {
+      const x = i - radius;
+      kernel[i] = Math.exp(-(x * x) / (2 * sigma * sigma));
+      sum += kernel[i];
+    }
+    for (let i = 0; i < size; i++) kernel[i] /= sum;
+    return { kernel, radius };
+  }
+
+  function gaussianBlur(data, w, h, sigma) {
+    if (sigma <= 0) return new Uint8ClampedArray(data);
+    const { kernel, radius } = makeGaussianKernel(sigma);
+    const tmp = new Float32Array(data.length);
+    const out = new Uint8ClampedArray(data.length);
+
+    // horizontal pass -> tmp
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let r=0, g=0, b=0;
+        for (let k = 0; k < kernel.length; k++) {
+          const nx = Math.min(w-1, Math.max(0, x + k - radius));
+          const idx = (y * w + nx) * 4;
+          const wt = kernel[k];
+          r += data[idx]   * wt;
+          g += data[idx+1] * wt;
+          b += data[idx+2] * wt;
+        }
+        const oi = (y * w + x) * 4;
+        tmp[oi]=r; tmp[oi+1]=g; tmp[oi+2]=b; tmp[oi+3]=data[oi+3];
+      }
+    }
+
+    // vertical pass -> out
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let r=0, g=0, b=0;
+        for (let k = 0; k < kernel.length; k++) {
+          const ny = Math.min(h-1, Math.max(0, y + k - radius));
+          const idx = (ny * w + x) * 4;
+          const wt = kernel[k];
+          r += tmp[idx]   * wt;
+          g += tmp[idx+1] * wt;
+          b += tmp[idx+2] * wt;
+        }
+        const oi = (y * w + x) * 4;
+        out[oi]=r; out[oi+1]=g; out[oi+2]=b; out[oi+3]=tmp[oi+3];
+      }
+    }
+    return out;
+  }
+
+  // Keep boxBlur for sharpness unsharp mask (faster, intentional)
   function boxBlur(data, w, h, radius) {
     const out = new Uint8ClampedArray(data);
-    const size = radius * 2 + 1;
-    // horizontal pass
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         let r=0,g=0,b=0,cnt=0;
@@ -889,7 +962,6 @@
       }
     }
     const out2 = new Uint8ClampedArray(out);
-    // vertical pass
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         let r=0,g=0,b=0,cnt=0;
@@ -937,11 +1009,11 @@
 
   function applyPreset(name) {
     const presets = {
-      anime:      { sharp:70, clarity:40, contrast:20, brightness:5, saturation:20, denoise:10 },
-      manga:      { sharp:90, clarity:60, contrast:35, brightness:0, saturation:-30, denoise:5 },
-      watercolor: { sharp:30, clarity:20, contrast:10, brightness:8, saturation:30, denoise:40 },
-      crisp:      { sharp:80, clarity:50, contrast:25, brightness:0, saturation:10, denoise:0 },
-      reset:      { sharp:50, clarity:30, contrast:0, brightness:0, saturation:0, denoise:0 },
+      anime:      { sharp:60, clarity:35, contrast:20, brightness:5, saturation:20, denoise:10, antialias:40 },
+      manga:      { sharp:80, clarity:55, contrast:35, brightness:0, saturation:-30, denoise:5, antialias:30 },
+      watercolor: { sharp:20, clarity:15, contrast:10, brightness:8, saturation:30, denoise:40, antialias:50 },
+      crisp:      { sharp:75, clarity:45, contrast:25, brightness:0, saturation:10, denoise:0, antialias:20 },
+      reset:      { sharp:50, clarity:30, contrast:0, brightness:0, saturation:0, denoise:0, antialias:0 },
     };
     const p = presets[name];
     if (!p) return;
@@ -951,12 +1023,14 @@
     document.getElementById('sliderBrightness').value = p.brightness;
     document.getElementById('sliderSaturation').value = p.saturation;
     document.getElementById('sliderDenoise').value = p.denoise;
+    document.getElementById('sliderAntialias').value = p.antialias;
     updateVal('valSharp', p.sharp);
     updateVal('valClarity', p.clarity);
     updateVal('valContrast', p.contrast);
     updateVal('valBrightness', p.brightness);
     updateVal('valSaturation', p.saturation);
     updateVal('valDenoise', p.denoise);
+    updateVal('valAntialias', p.antialias);
     processImage();
   }
 </script>
