@@ -679,6 +679,16 @@
         <hr class="divider">
 
         <!-- Export format -->
+        <!-- Upscale -->
+        <div style="margin-bottom:8px;font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;font-family:'Space Mono',monospace;">アップスケール処理</div>
+        <div class="format-row" style="margin-bottom:8px;">
+          <div class="fmt-btn active" id="scale1x" onclick="setScale(1,this)">等倍</div>
+          <div class="fmt-btn" id="scale2x" onclick="setScale(2,this)">×2</div>
+          <div class="fmt-btn" id="scale3x" onclick="setScale(3,this)">×3</div>
+          <div class="fmt-btn" id="scale4x" onclick="setScale(4,this)">×4</div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:20px;line-height:1.6;">拡大してシャープ処理後、元サイズに縮小。<br>線のギザギザが自然に消えます。</div>
+
         <div style="margin-bottom:8px;font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;font-family:'Space Mono',monospace;">書き出し形式</div>
         <div class="format-row">
           <div class="fmt-btn active" onclick="setFormat('png',this)">PNG</div>
@@ -708,6 +718,7 @@
   let originalImageData = null;
   let originalImg = null;
   let exportFormat = 'png';
+  let upscaleFactor = 1;
   let viewMode = 'split';
   let processingTimer = null;
 
@@ -835,27 +846,43 @@
       const lineDark = parseInt(document.getElementById('sliderLineDark').value);
 
       const src = originalImageData;
-      const w = src.width, h = src.height;
+      const origW = src.width, origH = src.height;
 
-      // Step 1: Antialias — gentle gaussian blur to smooth jagged edges
-      let data = new Uint8ClampedArray(src.data);
+      // ── UPSCALE: draw original onto larger offscreen canvas ──
+      const scale = upscaleFactor;
+      const w = origW * scale, h = origH * scale;
+      const upCanvas = document.createElement('canvas');
+      upCanvas.width = w; upCanvas.height = h;
+      const upCtx = upCanvas.getContext('2d');
+      upCtx.imageSmoothingEnabled = true;
+      upCtx.imageSmoothingQuality = 'high';
+      // put original imageData into temp canvas, then draw scaled
+      const tmpC = document.createElement('canvas');
+      tmpC.width = origW; tmpC.height = origH;
+      tmpC.getContext('2d').putImageData(src, 0, 0);
+      upCtx.drawImage(tmpC, 0, 0, w, h);
+      let data = upCtx.getImageData(0, 0, w, h).data;
+      data = new Uint8ClampedArray(data);
+
+      // Step 1: Antialias
       if (antialias > 0) {
         const sigma = antialias / 100 * 1.8;
         data = gaussianBlur(data, w, h, sigma);
       }
 
-      // Step 1b: Denoise (stronger gaussian blur)
+      // Step 1b: Denoise
       if (denoise > 0) {
         const sigma = denoise / 100 * 3.0;
         data = gaussianBlur(data, w, h, sigma);
       }
 
-      // Step 2: Unsharp mask for sharpness + clarity
+      // Step 2: Unsharp mask — stronger at higher scales
       if (sharp > 0 || clarity > 0) {
-        const sharpAmount = sharp / 100 * 2.5;
-        const clarityAmount = clarity / 100 * 1.2;
-        const blurred = boxBlur(data, w, h, 1);
-        const blurredMid = boxBlur(data, w, h, 4);
+        const boost = 1 + (scale - 1) * 0.5; // scale bonus
+        const sharpAmount = sharp / 100 * 2.5 * boost;
+        const clarityAmount = clarity / 100 * 1.2 * boost;
+        const blurred = boxBlur(data, w, h, scale);
+        const blurredMid = boxBlur(data, w, h, scale * 3);
         for (let i = 0; i < data.length; i += 4) {
           for (let c = 0; c < 3; c++) {
             const diff = data[i+c] - blurred[i+c];
@@ -941,11 +968,21 @@
         data[i] = clamp(r); data[i+1] = clamp(g); data[i+2] = clamp(b);
       }
 
-      // Output
+      // ── DOWNSCALE back to original size (anti-aliased) ──
+      const processedCanvas = document.createElement('canvas');
+      processedCanvas.width = w; processedCanvas.height = h;
+      processedCanvas.getContext('2d').putImageData(new ImageData(data, w, h), 0, 0);
+
       const canvasResult = document.getElementById('canvasResult');
+      canvasResult.width = origW; canvasResult.height = origH;
       const ctx = canvasResult.getContext('2d');
-      const result = new ImageData(data, w, h);
-      ctx.putImageData(result, 0, 0);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      if (scale === 1) {
+        ctx.putImageData(new ImageData(data, w, h), 0, 0);
+      } else {
+        ctx.drawImage(processedCanvas, 0, 0, origW, origH);
+      }
 
       fill.style.width = '100%';
       setTimeout(() => { bar.classList.remove('active'); fill.style.width = '0%'; }, 300);
@@ -1050,8 +1087,16 @@
 
   function setFormat(fmt, el) {
     exportFormat = fmt;
-    document.querySelectorAll('.fmt-btn').forEach(b=>b.classList.remove('active'));
+    // Only toggle among format buttons (not scale buttons)
+    el.closest('.format-row').querySelectorAll('.fmt-btn').forEach(b=>b.classList.remove('active'));
     el.classList.add('active');
+  }
+
+  function setScale(factor, el) {
+    upscaleFactor = factor;
+    el.closest('.format-row').querySelectorAll('.fmt-btn').forEach(b=>b.classList.remove('active'));
+    el.classList.add('active');
+    processImage();
   }
 
   function downloadResult() {
